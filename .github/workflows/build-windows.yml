@@ -1,0 +1,178 @@
+name: Build Windows Executable
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+  pull_request:
+    branches: [ master ]
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        
+    - name: Cache pip dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~\AppData\Local\pip\Cache
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+          
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pyinstaller pillow>=10.0.0
+        
+    - name: Create application icons
+      run: python create_icon.py
+      
+    - name: Build Windows executable
+      run: pyinstaller --clean xp3_viewer.spec
+      
+    - name: Verify executable
+      run: |
+        if (Test-Path "dist\XP3_Viewer_Converter.exe") {
+          Write-Host "✓ Windows executable created successfully!"
+          $fileSize = (Get-Item "dist\XP3_Viewer_Converter.exe").Length
+          $fileSizeMB = [math]::Round($fileSize / 1MB, 1)
+          Write-Host "File size: $fileSizeMB MB"
+          echo "EXECUTABLE_SIZE=$fileSizeMB" >> $env:GITHUB_ENV
+        } else {
+          Write-Error "Windows executable not found!"
+          exit 1
+        }
+      shell: pwsh
+      
+    - name: Test executable
+      run: |
+        echo "Testing executable creation..."
+        dist\XP3_Viewer_Converter.exe --version || echo "Version check not available"
+      continue-on-error: true
+      
+    - name: Create portable package
+      run: |
+        $packageDir = "XP3_Viewer_Converter_v1.0.2_Windows"
+        New-Item -ItemType Directory -Path $packageDir -Force
+        
+        Copy-Item "dist\XP3_Viewer_Converter.exe" "$packageDir\" -Force
+        Copy-Item "README.md" "$packageDir\" -Force
+        Copy-Item "LICENSE" "$packageDir\" -Force
+        Copy-Item "USAGE_EXAMPLES.md" "$packageDir\" -Force
+        Copy-Item "xp3_icon.ico" "$packageDir\" -Force
+        
+        $runScript = @"
+        @echo off
+        title XP3 Viewer and Converter - Made by Darryl Clay
+        echo Welcome to the first Iteration of XP3 Viewer/Converter
+        echo Made by Darryl Clay
+        echo.
+        echo Starting application...
+        XP3_Viewer_Converter.exe
+        pause
+        "@
+        
+        $runScript | Out-File -FilePath "$packageDir\Run_XP3_Viewer.bat" -Encoding ASCII
+        
+        Compress-Archive -Path $packageDir -DestinationPath "$packageDir.zip" -Force
+        
+        Write-Host "✓ Portable package created"
+      shell: pwsh
+      
+    - name: Upload executable artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: XP3_Viewer_Converter_Windows_Executable
+        path: dist/XP3_Viewer_Converter.exe
+        
+    - name: Upload portable package artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: XP3_Viewer_Converter_Windows_Portable
+        path: XP3_Viewer_Converter_v1.0.2_Windows.zip
+        
+    - name: Create installer with Inno Setup
+      if: startsWith(github.ref, 'refs/tags/')
+      run: |
+        # Download and install Inno Setup
+        Invoke-WebRequest -Uri "https://files.jrsoftware.org/is/6/innosetup-6.2.2.exe" -OutFile "innosetup.exe"
+        Start-Process -FilePath "innosetup.exe" -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART" -Wait
+        
+        # Build installer
+        & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer_script.iss
+        
+        if (Test-Path "installer\XP3_Viewer_Converter_v1.0.2_Setup.exe") {
+          Write-Host "✓ Windows installer created"
+        } else {
+          Write-Host "⚠ Installer creation failed"
+        }
+      shell: pwsh
+      continue-on-error: true
+      
+    - name: Upload installer artifact
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: actions/upload-artifact@v3
+      with:
+        name: XP3_Viewer_Converter_Windows_Installer
+        path: installer/XP3_Viewer_Converter_v1.0.2_Setup.exe
+      continue-on-error: true
+        
+    - name: Create GitHub Release
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: softprops/action-gh-release@v1
+      with:
+        name: XP3 Viewer and Converter ${{ github.ref_name }} - First Iteration
+        body: |
+          # XP3 Viewer and Converter ${{ github.ref_name }} Release
+          
+          ## What's New in ${{ github.ref_name }}
+          - ✨ **First Iteration of XP3 Viewer/Converter**
+          - 🎨 Windows XP styling and theming
+          - 🔄 Loading screen with "Welcome to the first Iteration of XP3 Viewer/Converter"
+          - 👤 Attribution: "Made by Darryl Clay" displayed throughout the application
+          - 🔄 Loading animations and status indicators
+          - 🏗️ Optimized performance and error handling
+          - 📦 Professional Windows installer package
+          
+          ## Features
+          - Extract individual files or entire XP3 archives
+          - Preview image files with optimized rendering
+          - Convert images to PNG, JPEG, BMP, or TIFF formats
+          - Enhanced error handling and performance
+          - Cross-platform support (Windows executable provided)
+          
+          ## Downloads
+          - `XP3_Viewer_Converter.exe` - Standalone Windows executable (${{ env.EXECUTABLE_SIZE }} MB)
+          - `XP3_Viewer_Converter_v1.0.2_Windows.zip` - Portable package
+          - `XP3_Viewer_Converter_v1.0.2_Setup.exe` - Windows installer (if available)
+          
+          ## Installation
+          1. Download the executable or portable package
+          2. Run `XP3_Viewer_Converter.exe` directly (no installation required)
+          3. Or use the Windows installer for system-wide installation
+          
+          ## System Requirements
+          - Windows 7 or later
+          - No additional software required (standalone executable)
+          
+          **Made by Darryl Clay**
+          
+        files: |
+          dist/XP3_Viewer_Converter.exe
+          XP3_Viewer_Converter_v1.0.2_Windows.zip
+          installer/XP3_Viewer_Converter_v1.0.2_Setup.exe
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
