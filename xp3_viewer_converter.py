@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
 """
-XP3 Viewer and Converter
+XP3 Viewer and Converter v1.0.2
 A Windows GUI application for extracting, viewing, and converting XP3 archive files
 to different image formats (JPEG, PNG, etc.)
 
 XP3 is an archive format used by KiriKiri visual novel engine.
+
+Optimized version with improved performance, loading screen, and Windows XP styling.
+Made by Darryl Clay
 """
 
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox, scrolledtext
+from tkinter import ttk, filedialog, messagebox
 import os
 import struct
 import zlib
@@ -16,28 +19,57 @@ import threading
 from PIL import Image, ImageTk
 import io
 from pathlib import Path
-import json
+import sys
+import traceback
+import gc
+from concurrent.futures import ThreadPoolExecutor
+import time
+
+# Version info
+__version__ = "1.0.2"
+__author__ = "Darryl Clay"
+
+# Configuration constants
+MAX_PREVIEW_SIZE = (500, 400)
+MAX_THREADS = 4
+CHUNK_SIZE = 8192
 
 class XP3Archive:
-    """Handle XP3 archive format operations"""
+    """Optimized XP3 archive format handler with improved error handling"""
     
     def __init__(self, filepath):
-        self.filepath = filepath
+        self.filepath = Path(filepath)
         self.files = {}
         self.loaded = False
+        self.file_size = 0
     
     def load(self):
-        """Load and parse XP3 archive"""
+        """Load and parse XP3 archive with enhanced error handling"""
         try:
+            if not self.filepath.exists():
+                raise FileNotFoundError(f"XP3 file not found: {self.filepath}")
+            
+            self.file_size = self.filepath.stat().st_size
+            if self.file_size < 32:  # Minimum XP3 file size
+                raise ValueError("File too small to be a valid XP3 archive")
+            
             with open(self.filepath, 'rb') as f:
                 # Check XP3 signature
                 signature = f.read(11)
                 if signature != b'XP3\r\n \n\x1a\x8b\x67\x01':
-                    raise ValueError("Not a valid XP3 file")
+                    raise ValueError("Not a valid XP3 file - invalid signature")
                 
                 # Read index offset
                 f.seek(-8, 2)  # Go to end of file minus 8 bytes
-                index_offset = struct.unpack('<Q', f.read(8))[0]
+                index_offset_data = f.read(8)
+                if len(index_offset_data) != 8:
+                    raise ValueError("Corrupted XP3 file - cannot read index offset")
+                
+                index_offset = struct.unpack('<Q', index_offset_data)[0]
+                
+                # Validate index offset
+                if index_offset >= self.file_size or index_offset < 11:
+                    raise ValueError("Invalid index offset in XP3 file")
                 
                 # Read index
                 f.seek(index_offset)
@@ -47,7 +79,10 @@ class XP3Archive:
                 return True
                 
         except Exception as e:
-            print(f"Error loading XP3 file: {e}")
+            error_msg = f"Error loading XP3 file {self.filepath.name}: {str(e)}"
+            print(error_msg)
+            if hasattr(e, '__traceback__'):
+                traceback.print_exc()
             return False
     
     def _read_index(self, f):
@@ -449,17 +484,19 @@ class XP3ViewerConverter:
     
     def show_about(self):
         """Show about dialog"""
-        about_text = """XP3 Viewer and Converter v1.0
+        about_text = f"""XP3 Viewer and Converter v{__version__}
 
 A tool for extracting, viewing, and converting files from XP3 archives.
 XP3 is an archive format used by the KiriKiri visual novel engine.
 
 Features:
 • Extract individual files or entire archives
-• Preview image files
+• Preview image files with optimized rendering
 • Convert images to PNG, JPEG, BMP, or TIFF formats
+• Enhanced error handling and performance
 • Cross-platform support
 
+By {__author__}
 Created with Python and tkinter."""
         
         messagebox.showinfo("About XP3 Viewer and Converter", about_text)

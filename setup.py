@@ -18,7 +18,7 @@ def read_requirements():
 
 setup(
     name="xp3-viewer-converter",
-    version="1.0.0",
+    version="1.0.2",
     author="XP3 Viewer Team",
     description="A GUI application for viewing and converting XP3 archive files",
     long_description=read_readme(),
